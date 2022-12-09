@@ -9,28 +9,28 @@ int GetNeiborPCA_cor(SNeiborPCA_cor &npca, pcl::PointCloud<pcl::PointXYZ>::Ptr c
     std::vector<float> k_dis;
     pcl::PointCloud<pcl::PointXYZ>::Ptr subCloud(new pcl::PointCloud<pcl::PointXYZ>);
 
-    if(kdtree.radiusSearch(searchPoint,fSearchRadius,npca.neibors,k_dis)>5)
-    {
+    if(kdtree.radiusSearch(searchPoint,fSearchRadius,npca.neibors,k_dis)>5)//给npca.neibors，k_dis赋值为点的个数和距离，搜索半径fSearchRadius是1m
+    {//如果搜索到的点的个数>5
         subCloud->width=npca.neibors.size();
         subCloud->height=1;
         subCloud->points.resize(subCloud->width*subCloud->height);
 
-        for (int pid=0;pid<subCloud->points.size();pid++)//搜索半径内的地面点云 sy
+        for (int pid=0;pid<subCloud->points.size();pid++)//搜索半径1m内的地面点云
         {
             subCloud->points[pid].x=cloud->points[npca.neibors[pid]].x;
             subCloud->points[pid].y=cloud->points[npca.neibors[pid]].y;
             subCloud->points[pid].z=cloud->points[npca.neibors[pid]].z;
         }
-        //利用PCA主元分析法获得点云的三个主方向，获取质心，计算协方差，获得协方差矩阵，求取协方差矩阵的特征值和特长向量，特征向量即为主方向。 sy
+        //利用PCA主元分析法获得点云的三个主方向，获取质心，计算协方差，获得协方差矩阵，求取协方差矩阵的特征值和特长向量，特征向量即为主方向。
         Eigen::Vector4f pcaCentroid;
-    	pcl::compute3DCentroid(*subCloud, pcaCentroid);
+    	pcl::compute3DCentroid(*subCloud, pcaCentroid);// 计算质心，输入点云->输出质心
 	    Eigen::Matrix3f covariance;
-	    pcl::computeCovarianceMatrixNormalized(*subCloud, pcaCentroid, covariance);
-	    Eigen::SelfAdjointEigenSolver<Eigen::Matrix3f> eigen_solver(covariance, Eigen::ComputeEigenvectors);
-	    npca.eigenVectorsPCA = eigen_solver.eigenvectors();
-	    npca.eigenValuesPCA = eigen_solver.eigenvalues();
+	    pcl::computeCovarianceMatrixNormalized(*subCloud, pcaCentroid, covariance);// 通过质心计算协方差
+	    Eigen::SelfAdjointEigenSolver<Eigen::Matrix3f> eigen_solver(covariance, Eigen::ComputeEigenvectors);// 获取协方差矩阵
+	    npca.eigenVectorsPCA = eigen_solver.eigenvectors();// 特征值
+	    npca.eigenValuesPCA = eigen_solver.eigenvalues();// 特征向量
         float vsum=npca.eigenValuesPCA(0)+npca.eigenValuesPCA(1)+npca.eigenValuesPCA(2);
-        npca.eigenValuesPCA(0)=npca.eigenValuesPCA(0)/(vsum+0.000001);//单位化 sy
+        npca.eigenValuesPCA(0)=npca.eigenValuesPCA(0)/(vsum+0.000001);//单位化
         npca.eigenValuesPCA(1)=npca.eigenValuesPCA(1)/(vsum+0.000001);
         npca.eigenValuesPCA(2)=npca.eigenValuesPCA(2)/(vsum+0.000001);
     }
@@ -49,7 +49,7 @@ int FilterGndForPos_cor(float* outPoints,float*inPoints,int inNum)
     float dy=2;
     int x_len = 20;
     int y_len = 10;
-    int nx=2*x_len/dx; //80
+    int nx=2*x_len/dx; //20
     int ny=2*y_len/dy; //10
     float offx=-20,offy=-10;
     float THR=0.4;
@@ -73,8 +73,10 @@ int FilterGndForPos_cor(float* outPoints,float*inPoints,int inNum)
     for(int pid=0;pid<inNum;pid++)
     {
         idtemp[pid] = -1;
-        if((inPoints[pid*4] > -x_len) && (inPoints[pid*4]<x_len)&&(inPoints[pid*4+1]>-y_len)&&(inPoints[pid*4+1]<y_len))
+        //inPoints里是原始点云数据，分别是x，y，z和intensity，所以数组中的每个点的偏移量是4
+        if((inPoints[pid*4] > -x_len) && (inPoints[pid*4]<x_len)&&(inPoints[pid*4+1]>-y_len)&&(inPoints[pid*4+1]<y_len))//选取x轴上20m以内的点，y轴上10m以内的点
         {
+            // 减去offset使值都为正：idx[0-20],idy[0-10]
             int idx=(inPoints[pid*4]-offx)/dx;
             int idy=(inPoints[pid*4+1]-offy)/dy;
             idtemp[pid] = idx+idy*nx;
@@ -89,16 +91,17 @@ int FilterGndForPos_cor(float* outPoints,float*inPoints,int inNum)
             if(inPoints[pid*4+2]>imgMaxZ[idx+idy*nx]){
                 imgMaxZ[idx+idy*nx]=inPoints[pid*4+2];
             }
-        }
+        }//这部分搞了很多杂七杂八的，实际上就是把点云数据填在20*10的矩阵中（矩阵中的每个值代表现实世界中一个2*2的格子），imgSumZ是格子里所有点的z轴值之和
+        //imgNumZ记录了格子里点的数量，imgMinZ和imgMaxZ分别记录格子里所有点的z轴值的最小值和最大值
     }
     for(int pid=0;pid<inNum;pid++)
     {
-        if (outNum >= 60000)
+        if (outNum >= 60000)//只处理60000个点
             break;
         if(idtemp[pid] > 0 && idtemp[pid] < nx*ny)
         {
             imgMeanZ[idtemp[pid]] = float(imgSumZ[idtemp[pid]]/(imgNumZ[idtemp[pid]] + 0.0001));
-            //最高点与均值高度差小于阈值；点数大于3；均值高度小于1 
+            //格子里最高点与均值高度差小于阈值0.4m；点的数目大于3；均值高度小于2m，则该点记为outNum（初步筛选出的ground点），并统计outNum的个数
             if((imgMaxZ[idtemp[pid]] - imgMeanZ[idtemp[pid]]) < THR && imgNumZ[idtemp[pid]] > 3 && imgMeanZ[idtemp[pid]] < 2)
             {// imgMeanZ[idtemp[pid]]<0&&
                 outPoints[outNum*4]=inPoints[pid*4];
@@ -119,7 +122,7 @@ int FilterGndForPos_cor(float* outPoints,float*inPoints,int inNum)
     return outNum;
 }
 
-int CalGndPos_cor(float *gnd, float *fPoints,int pointNum,float fSearchRadius)
+int CalGndPos_cor(float *gnd, float *fPoints,int pointNum,float fSearchRadius)//fSearchRadius是1.0
 {
     // 初始化gnd
     for(int ii=0;ii<6;ii++)
@@ -158,11 +161,11 @@ int CalGndPos_cor(float *gnd, float *fPoints,int pointNum,float fSearchRadius)
             searchPoint.y=cloud->points[pid].y;
             searchPoint.z=cloud->points[pid].z;
 
-            if(GetNeiborPCA_cor(npca,cloud,kdtree,searchPoint,fSearchRadius)>0)
+            if(GetNeiborPCA_cor(npca,cloud,kdtree,searchPoint,fSearchRadius)>0)//半径1m内的点多于
             {
                 for(int ii=0;ii<npca.neibors.size();ii++)
                 {
-                    pLabel[npca.neibors[ii]]=1;
+                    pLabel[npca.neibors[ii]]=1;//标记为地面点
                 }
 
                 if(npca.eigenValuesPCA[1]/(npca.eigenValuesPCA[0] + 0.00001)>5000){ //指的是主方向与次方向差异较大。即这一小块接近平面 sy
@@ -293,15 +296,15 @@ int GetGndPos(float *pos, float *fPoints,int pointNum){
         std::cout << "too few ground points!\n";
     }
     int gndnum = CalGndPos_cor(tmpPos,fPoints3,pnum3,1.0);//用法向量判断，获取到法向量 & 地面搜索点，放到tmppos
-    if(gnd_pos[5]==0){
+    if(gnd_pos[5]==0){//给gnd_pos赋初值
         memcpy(gnd_pos,tmpPos,sizeof(tmpPos));
     }
     else{
-
+        //控制频率为5Hz，每5个tmpPos存一次，gnd_pos
         if(frame_count<frame_lenth_threshold&&tmpPos[5]!=0){
             if(gndnum>0&&abs(gnd_pos[0]-tmpPos[0])<0.1&&abs(gnd_pos[1]-tmpPos[1])<0.1){//更新法向量            
                 for(int i = 0;i<6;i++){
-                    gnd_pos[i] = (gnd_pos[i]+tmpPos[i])*0.5;
+                    gnd_pos[i] = (gnd_pos[i]+tmpPos[i])*0.5;//与上一个gnd_pos平均加权
                 }
                 frame_count = 0;
             }
@@ -310,12 +313,12 @@ int GetGndPos(float *pos, float *fPoints,int pointNum){
             }
         }
         else if(tmpPos[5]!=0){
-            memcpy(gnd_pos,tmpPos,sizeof(tmpPos));
+            memcpy(gnd_pos,tmpPos,sizeof(tmpPos));// 将tmpPos存到数组gnd_pos中
             frame_count = 0;
         }
     }
    
-    memcpy(pos,gnd_pos,sizeof(float)*6);
+    memcpy(pos,gnd_pos,sizeof(float)*6);//void *memcpy(void*dest, const void *src, size_t n);
 
     free(fPoints3);
     

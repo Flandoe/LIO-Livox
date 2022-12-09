@@ -71,7 +71,7 @@ int PCSeg::DoSeg(int *pLabel1, float* fPoints1, int pointNum)
     tmpPos[3]=0;
     tmpPos[4]=0;
     tmpPos[5]=-2.04;
-    GetGndPos(tmpPos,fPoints2,pntNum); //tempPos是更新后的地面搜索点 & 平均法向量 ys
+    GetGndPos(tmpPos,fPoints2,pntNum); //tmpPos是更新后的地面搜索点 & 平均法向量 ys
     memcpy(this->gndPos,tmpPos,6*sizeof(float));
     
     this->posFlag=1;//(this->posFlag+1)%SELF_CALI_FRAMES;
